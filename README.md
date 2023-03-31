@@ -2,6 +2,8 @@
 
 # Cycle-Route: Taking the Guess-Work Out of Cycling!
 
+### Visit the app here: https://ammarbagharib.shinyapps.io/cycle-route/
+
 Project done for NUS module, Descriptive Analytics with R, in Spring 2022
 
 - Ammar Bin Hussein Bagharib
