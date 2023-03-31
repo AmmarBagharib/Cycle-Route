@@ -19,7 +19,7 @@ Cycling is a popular, accessible and effective mode of exercise in Singapore, bu
 
 ### Problem Description
 
-With cycling gaining popularity recently, there has also been an increasing variety of consumer worries and needs. An individual’s routine cycling journey currently has many rooms of improvements. These can generally be broken down based on time of occurrence, namely pre-riding, intra-riding and post-riding. The key challenges and concerns for either group have been described in Table 2.
+With cycling gaining popularity recently, there has also been an increasing variety of consumer worries and needs. An individual’s routine cycling journey currently has many rooms of improvements. These can generally be broken down based on time of occurrence, namely pre-riding, intra-riding and post-riding.
 
 ##### Table 1: Key challenges & concerns of each cyclist segment.
 | Group | Fitness & Cycling Enthusiasts |	Curious & Casual Cyclists |
