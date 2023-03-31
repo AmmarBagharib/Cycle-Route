@@ -1,0 +1,206 @@
+---
+title: "gsintermediate"
+output: html_document
+---
+```{r}
+library(s2)
+library(geosphere)
+library(dplyr)
+library(osrm)
+library(ggmap)
+library(shiny)
+library(shinyTime)
+library(ggplot2)
+library(jsonlite)
+library(leaflet)
+library(leaflet.extras)
+library(fontawesome)
+library(mapsapi)
+library(xml2)
+library(googleway)
+```
+
+```{r}
+gas_stations <- read.csv("gas_stations.csv")
+park <- read.csv("park.csv")
+cafe <- read.csv("cafe.csv")
+convenience_store <- read.csv("convenience_stores.csv")
+shopping_mall <- read.csv("shopping_mall.csv")
+bus_station <- read.csv("bus_station.csv")
+```
+
+```{r}
+# write a function to get the nearest location
+nearest <- function(curr.long.lat, next.loc){ # curr.long.lat is a vector of the current location, next.loc is a character of the next target location e.g. "gas stations"
+  # read csv of next.loc
+  next_loc <- read.csv(gsub(" ", "", paste(gsub(" ", "_", next.loc), ".csv")))
+  
+  curr.long.latv <- s2_lnglat(curr.long.lat[1],
+                              curr.long.lat[2])
+  target.loc.long.lat <- s2_lnglat(next_loc$geometry.location.lng,
+                                   next_loc$geometry.location.lat)
+  closest.long.lat <- s2_closest_feature(curr.long.latv,
+                                         target.loc.long.lat)
+  closest.coordinate <- c(next_loc[closest.long.lat, "geometry.location.lng"],
+                          next_loc[closest.long.lat, "geometry.location.lat"])
+  
+  placename <- next_loc[closest.long.lat, "name"]
+  place_info <- list(placename, as.numeric(closest.coordinate))
+
+  return (place_info) # returns a list with place name and a vector of the long and lat of the closest next location, to be supplied to the mp_directions function
+}
+
+# testing 
+#nearest(c(103.8000, 1.330022), "gas stations")
+```
+
+```{r}
+nearest.loc.mat <- function(origin, ...){
+  locations <- unlist(list(...))
+  
+  if (is.null(locations)){
+    return(0) # placeholder for when no locations are supplied as input arguments; to be replaced with function to generate random route that fulfills other restraints
+    
+  } else {
+    output <- list()
+    output.rownames <- c()
+    
+    for (i in 1:length(locations)){
+      inter <- c(origin[i, ])
+      closest.amen <- nearest(inter, locations[i])
+      closest.amen.long.lat <- closest.amen[2]
+      closest.amen.name <- closest.amen[1]
+      output.rownames <- c(output.rownames, closest.amen.name)
+      output <- append(output, closest.amen.long.lat)
+    }
+  }
+  
+  output <- matrix(unlist(output),
+                   ncol=2,
+                   byrow=T)
+  colnames(output) <- c("longitude", "latitude")
+  rownames(output) <- output.rownames
+  
+  return (output)
+}
+
+```
+
+
+```{r}
+# obtain intermediate longs and lats to perform radius search given intermediate locations, return matrix of locations
+intermediate.loc.mat <- function(origin, destination, ...){
+  locations <- list(...)
+  n <- length(locations)
+  search_points <- gcIntermediate(origin, destination, n)
+  output <- nearest.loc.mat(search_points, locations)
+  return (output)
+}
+```
+
+# testing above code only - can be ignored
+```{r}
+search_points <- gcIntermediate(origin, destination, 3)
+print(search_points)
+
+output <- nearest.loc.mat(search_points, "park", "convenience stores", "shopping mall")
+output
+```
+
+```{r}
+# plotting
+key = 'AIzaSyAFwIr0aBkkLxXzihnK_LPlh-Ph77FZy44'
+
+#origin, destination and test can be changed
+origin <- c(103.8000, 1.330022)
+destination <- c(103.8250, 1.330674)
+test <- intermediate.loc.mat(origin, destination, "park", "convenience stores", "shopping mall")
+
+doc2 <- mp_directions(
+  origin = origin,
+  waypoints = test,
+  destination = destination,
+  alternatives = T,
+  key = key,
+  mode = "walking",
+  quiet = F
+) 
+#the output is a XML document with Google Maps Geocode API response - whatever that means
+
+doc2 = as_xml_document(doc2) # apparently we have to read it into an XML document - whatever that means
+d2 <- mp_get_routes(doc2) # mp_get_routes is a function to uhm..get the route
+
+# ignore this
+#doc3 <- mp_directions(
+  #origin = c(103.8000, 1.330022),
+  #destination = c(103.8250, 1.330674),
+  #alternatives = F,
+  #key = key,
+  #mode = "walking",
+  #quiet = TRUE
+#) 
+#the output is a XML document with Google Maps Geocode API response - whatever that means
+
+#doc3 = as_xml_document(doc3) # apparently we have to read it into an XML document - whatever that means
+#d3 <- mp_get_routes(doc1) # mp_get_routes is a function to uhm..get the route
+
+
+
+# plot map
+map <- leaflet() %>% addTiles() %>%
+  addPolylines(data = d2, opacity = 1, weight = 4)
+
+# add location markers
+addLocationMarkers <- function(map, origin, destination, location.matrix){
+  temp_icon <- makeAwesomeIcon(text=fa("circle"), iconColor="white", markerColor="blue")
+  m <- rbind(rbind(origin, location.matrix), destination)
+  m <- asplit(m, 2)
+  longitudes <- m$longitude
+  latitudes <- m$latitude
+  
+  for (i in 1:length(longitudes)){
+    map <- map %>%
+      addAwesomeMarkers(lng=longitudes[i],
+                        lat=latitudes[i],
+                        popup=names(longitudes[i]),
+                        icon=temp_icon)
+  }
+  
+  return (map)
+}
+
+print(test)
+addLocationMarkers(map, origin, destination, test)
+```
+
+# elevation
+```{r}
+df <- google_elevation(df_locations = data.frame(rbind(rbind(origin, test), destination)),
+                       location_type = "path",
+                       samples = 100,
+                       simplify = TRUE,
+                       key = key)
+
+library(ggplot2)
+df_plot <- data.frame(elevation = df$results$elevation,
+                       location = as.integer(rownames(df$results)))
+
+ggplot(data = df_plot, aes(x = location, y = elevation)) +
+  geom_line()
+
+```
+
+```{r}
+key = 'AIzaSyAFwIr0aBkkLxXzihnK_LPlh-Ph77FZy44'
+
+origin <- mp_geocode('Marina Bay sands', region='sg', postcode=NULL, key=key,quiet=FALSE, timeout=10)
+
+origin <- mp_get_points(origin)
+a <- c(origin$pnt$`1`[1], origin$pnt$`1`[2])
+a
+```
+```{r}
+map <- leaflet() %>% addTiles()
+map
+```
+

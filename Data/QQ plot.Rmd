@@ -1,0 +1,431 @@
+---
+title: "Project plotting"
+output: html_document
+---
+
+```{r}
+gas_stations <- read.csv("gas_stations.csv")
+park <- read.csv("park.csv")
+cafe <- read.csv("cafe.csv")
+convenience_store <- read.csv("convenience_stores.csv")
+shopping_mall <- read.csv("shopping_mall.csv")
+```
+
+```{r}
+# enable google API key
+library(ggmap)
+register_google(key='AIzaSyAFwIr0aBkkLxXzihnK_LPlh-Ph77FZy44')
+```
+# draw the route between 2 locations
+```{r}
+from <- "ESSO BUKIT TIMAH, singapore"
+to <- "TreeTop Walk, singapore"
+
+trek_df <- trek(from, to, mode="walking", alternatives = F)
+
+
+qmap("ESSO BUKIT TIMAH, singapore", zoom = 13) +
+  geom_path(
+    aes(x = lon, y = lat), colour = "red", size = 0.5,
+    data = trek_df, lineend = "round")
+``` 
+
+# calculate the distance between two locations
+```{r}
+from <- "ESSO BUKIT TIMAH, singapore"
+to <- "Caltex Alexandra, singapore"
+
+mapdist(from, to, mode = "bicycling")
+```
+
+
+```{r}
+as.POSIXct("2014-10-27 18:00:00 PDT")
+
+```
+
+
+# calculate the distance between two locations
+```{r}
+## geographic coordinates are accepted as well
+
+wh <- as.numeric(geocode("ESSO BUKIT TIMAH, singapore"))
+lm <- as.numeric(geocode("Caltex Alexandra, singapore"))
+mapdist(wh, lm, mode = "walking")
+```
+
+#Attempt using Mapsapi
+```{r}
+library(mapsapi)
+library(xml2)
+key='AIzaSyAFwIr0aBkkLxXzihnK_LPlh-Ph77FZy44'
+
+#gas_stations$long_lat <- lapply(1:nrow(gas_stations), 
+                               # function(i) #c(gas_stations$geometry.location.lng[i],
+                                              #gas_stations$geometry.location.lat[i]))
+
+esso_bt <- gas_stations[1, ] #1st row of gas_stations data
+TreeTop <- park[2,] 
+#shell <- gas_stations[2, ]#2nd row of gas_stations data
+#esso_bt$geometry.location.lat 
+
+doc <- mp_directions(
+  origin = c(esso_bt$geometry.location.lng, esso_bt$geometry.location.lat),
+  waypoints = c("Durian Loop", "Durian Loop", "Upper Peirce Reservoir"),
+  destination = c(TreeTop$geometry.location.lng, TreeTop$geometry.location.lat),
+  alternatives = FALSE,
+  key = key,
+  mode = "walking",
+  quiet = TRUE
+) 
+#the output is a XML document with Google Maps Geocode API response - whatever that means
+
+doc = as_xml_document(doc) #apparently we have to read it into an XML document - whatever that means
+r <- mp_get_routes(doc) #mp_get_routes is a function to uhm..get the route
+
+#distance <- mp_get_matrix(doc, value="distance_m")
+
+library(leaflet)
+
+leaflet() %>% addTiles() %>% addPolylines(data = r, opacity = 1, weight = 4) #can specify other things here tbh
+```
+
+
+```{r}
+locations = c("Tel-Aviv", "Jerusalem", "Neve Shalom")
+# Driving times 
+doc = mp_matrix(
+origins = locations,
+destinations = locations,
+mode = "driving",
+departure_time = Sys.time() + as.difftime(10, units = "mins"), key = key
+)
+
+# Public transport times doc = mp_matrix(
+mp_get_matrix(doc, value = "distance_m")
+mp_get_matrix(doc, value= "distance_text")
+mp_get_matrix(doc, value= "duration_s")
+mp_get_matrix(doc, value= "duration_text")
+mp_get_matrix(doc, value= "duration_in_traffic_s")
+mp_get_matrix(doc, value= "duration_in_traffic_text")
+
+
+```
+
+
+# use s2
+```{r}
+library('s2')
+
+nearest <- function(curr.long.lat, next.loc){ # curr.long.lat is a vector of the current location, next.loc is a character of the next target location e.g. "gas stations"
+  # read csv of next.loc
+  next_loc <- read.csv(gsub(" ", "", paste(gsub(" ", "_", next.loc), ".csv")))
+  
+  curr.long.latv <- s2_lnglat(curr.long.lat[1], curr.long.lat[2])
+  target.loc.long.lat <- s2_lnglat(next_loc$geometry.location.lng, next_loc$geometry.location.lat)
+  closest.long.lat <- s2_closest_feature(curr.long.latv, target.loc.long.lat)
+  closest.coordinate <- c(next_loc[closest.long.lat, "geometry.location.lng"],next_loc[closest.long.lat, "geometry.location.lat"])
+
+  return (closest.coordinate) # returns a vector of the long and lat of the closest next location, to be supplied to the mp_directions function
+}
+
+
+nearest.loc.mat <- function(origin, ...){
+  locations <- list(...)
+  
+  if (is.null(locations)){
+    return(0) # placeholder for when no locations are supplied as input arguments; to be replaced with function to generate random route that fulfills other restraints
+    
+  } else {
+    output <- list()
+    
+    for (location in locations){
+      next.long.lat <- nearest(origin, location)
+      output <- append(output, next.long.lat)
+      origin <- next.long.lat
+    }
+  }
+  
+  output <- matrix(unlist(output), ncol=length(locations), byrow=F)
+  colnames(output) <- locations
+  
+  return (output)
+}
+```
+
+```{r}
+nearest.loc.mat(c(103.799000 , 1.330022), "cafe", "convenience stores", "shopping mall")
+```
+
+
+# pseudocode
+1. user inputs his address/current location and the locations he/she wanna pass by in his/her run. we use map_geocode() to retrieve his/her current location's long and lat
+
+2. pass this long lat and the next location e.g. "gas stations" to the function i sent to u to get the row number of the corresponding csv (in this case gas_stations.csv) with the place that is nearest to the input longlat
+
+3. plot the route using mp_directions, then use mp_get_matrix() to get the distance of the route, add to a distance numeric variable created at the start of the function
+
+4. repeat 2, 3 until all locations are satisfied.
+
+5. for the last location we optimise a plot so that the distance is closest to the input total distance
+
+
+# use geosphere to define a function to get nearest cafe
+```{r}
+library(geosphere)
+library(dplyr)
+cafe <- cafe[!is.na(cafe$geometry.location.lng) & !is.na(cafe$geometry.location.lat),]
+
+nearest_cafe <- data.frame(Nearest=NA, Distance=NA, Lng=NA, Lat=NA)
+  
+origin.coords <- c(103.799000 , 1.330022)
+cafe.coords <- cafe %>% select(geometry.location.lng, geometry.location.lat)
+distances <- distm(origin.coords, cafe.coords, fun=distGeo)[1,]
+diff <- abs(distances - 750)
+row.num1 <- which.min(diff)
+
+nearest_cafe[1,]$Nearest <- cafe$name[row.num1]
+nearest_cafe[1,]$Distance <- distances[row.num1] %>% round(-1) %>% as.integer
+nearest_cafe[1,]$Lng <- cafe$geometry.location.lng[row.num1]
+nearest_cafe[1,]$Lat <- cafe$geometry.location.lat[row.num1]
+  
+print(nearest_cafe)
+```
+
+# get nearest convenience store from cafe
+```{r}
+library(geosphere)
+library(dplyr)
+convenience_store <- convenience_store[!is.na(convenience_store$geometry.location.lng) & !is.na(convenience_store$geometry.location.lat),]
+
+nearest_convenience_store <- function(n){
+  nearest_conve_store <- data.frame(Nearest=NA, Distance=NA, Lng=NA, Lat=NA)
+  
+  cafe.coords <- cafe[n,] %>% select(geometry.location.lng, geometry.location.lat)
+  conve_store.coords <- convenience_store %>% select(geometry.location.lng, geometry.location.lat)
+  #distances <- distm(cafe.coords, conve_store.coords, fun=distGeo)[1,]
+  distances <- distm(origin.coords, conve_store.coords, fun=distGeo)[1,]
+  diff <- abs(distances - 750)
+  row.num <- which.min(diff)
+  #row.num < which.min(distances)
+  
+  nearest_conve_store[1,]$Nearest <- convenience_store$name[row.num]
+  nearest_conve_store[1,]$Distance <- distances[row.num] %>% round(-1) %>% as.integer
+  nearest_conve_store[1,]$Lng <- convenience_store$geometry.location.lng[row.num]
+  nearest_conve_store[1,]$Lat <- convenience_store$geometry.location.lat[row.num]
+  
+  return(list(nearest_conve_store, row.num))
+}
+```
+
+```{r}
+conv_store_df <- nearest_convenience_store(row.num1)
+row.num2 <- nearest_convenience_store(row.num1)[[2]]
+nearest_convenience_store(row.num1)
+```
+
+
+# get nearest shopping mall from convenience store
+```{r}
+library(geosphere)
+library(dplyr)
+shopping_mall <- shopping_mall[!is.na(shopping_mall$geometry.location.lng) & !is.na(shopping_mall$geometry.location.lat),]
+
+nearest_shopping_mall <- function(n){
+  nearest_shopping_mall <- data.frame(Nearest=NA, Distance=NA, Lng=NA, Lat=NA)
+  
+  conve_store.coords <- convenience_store[n,] %>% select(geometry.location.lng, geometry.location.lat)
+  shopping_mall.coords <- shopping_mall %>% select(geometry.location.lng, geometry.location.lat)
+  #distances <- distm(conve_store.coords, shopping_mall.coords, fun=distGeo)[1,]
+  distances <- distm(origin.coords, conve_store.coords, fun=distGeo)[1,]
+  diff <- abs(distances - 500)
+  row.num <- which.min(diff)
+  #row.num <- which.min(distances)
+  
+  nearest_shopping_mall[1,]$Nearest <- shopping_mall$name[row.num]
+  nearest_shopping_mall[1,]$Distance <- distances[row.num] %>% round(-1) %>% as.integer
+  nearest_shopping_mall[1,]$Lng <- shopping_mall$geometry.location.lng[row.num]
+  nearest_shopping_mall[1,]$Lat <- shopping_mall$geometry.location.lat[row.num]
+  
+  return(list(nearest_shopping_mall, row.num))
+}
+```
+
+```{r}
+nearest_shopping_mall(row.num2)
+```
+
+
+
+# try osrm 
+```{r}
+library(osrm)
+locs <- data.frame(id = c("Origin", "FairPrice Xpress", "FairPrice Xpress", "The Grandstand"),
+                   lon = c(103.799000, 103.8065, 103.8065, 103.7934),
+                   lat = c(1.330022, 1.331706, 1.331706	, 1.338008)
+                   )
+
+# TRIP
+# Calculate the shortest round trip between the park locations
+trip <- osrmTrip(locs
+        ,returnclass = "sf", overview = "full", osrm.server = getOption("osrm.server"), osrm.profile= "foot")
+
+# Get the spatial lines dataframe 
+trip_sp <- trip[[1]]$trip
+
+# PLOT WITH LEAFLET
+leaflet(data = trip_sp) %>% 
+  setView(lng = 103.8125, lat = 1.360729, zoom = 13) %>%
+  addTiles() %>% 
+  addMarkers(lng = locs$lon, lat = locs$lat, popup = locs$id) %>%
+  addPolylines()
+```
+
+# get leg summary
+```{r}
+leg_summary <- trip_sp %>%
+  mutate(duration = round(duration, 1),
+         distance = round(distance, 1))
+
+leg_summary
+```
+# trip summary
+```{r}
+# duration in min, distance in km
+trip_summary <- trip[[1]]$summary
+trip_summary
+```
+# try osrmRoute. fail!!
+```{r}
+library(osrm)
+library(sf)
+
+pts <- structure(
+ list(x = c(103.799000, 103.8065, 103.7935, 103.7991, 103.799000), 
+      y = c(1.330022, 1.331706, 1.337730, 1.330933, 1.330022)), 
+class = "data.frame", row.names = c(NA, -10L))
+route5 <- osrmRoute(loc = pts, returnclass = "sf")
+plot(st_geometry(route5), col = "red", lwd = 2)
+points(pts, pch = 20, cex = 2)
+
+```
+
+
+
+
+
+# plot the map using mapsapi - fail!!!not circular route
+```{r}
+library(mapsapi)
+library(xml2)
+key='AIzaSyAFwIr0aBkkLxXzihnK_LPlh-Ph77FZy44'
+
+
+
+doc <- mp_directions(
+  origin = c(103.799000 , 1.330022),
+  waypoints = c(c(103.8065, 1.331706), c(103.7991, 1.330933), c(103.7935, 1.337730)),
+  destination = c(103.799000 , 1.330022),
+  alternatives = FALSE,
+  key = key,
+  mode = "walking",
+  quiet = TRUE
+) 
+#the output is a XML document with Google Maps Geocode API response - whatever that means
+
+doc = as_xml_document(doc) #apparently we have to read it into an XML document - whatever that means
+r <- mp_get_routes(doc) #mp_get_routes is a function to uhm..get the route
+
+#distance <- mp_get_matrix(doc, value="distance_m")
+
+library(leaflet)
+
+leaflet() %>% addTiles() %>% addPolylines(data = r, opacity = 1, weight = 4) #can specify other things here tbh
+```
+# 
+```{r}
+nxt_loc <- function(dist, curr.long.lat, next.loc){
+  next_loc <- read.csv(gsub(" ", "", paste(gsub(" ", "_", next.loc), ".csv")))
+
+  curr.long.latm <- matrix(curr.long.lat, ncol = 2)
+  print(matrix(as.numeric(curr.long.latm), ncol = 2))
+  next_loc <- next_loc %>%
+    mutate(Distance = distHaversine(matrix(as.numeric(curr.long.latm), ncol = 2),
+                                    matrix(c(as.numeric(geometry.location.lng),
+                                             as.numeric(geometry.location.lat)),
+                                           ncol = 2
+                                           )
+                                    )
+           )
+
+  index <- which.min(abs(dist - next_loc$Distance))
+  print(index)
+  closest.coordinate <- c(next_loc[index, "name"],
+                          next_loc[index, "geometry.location.lng"],
+                          next_loc[index, "geometry.location.lat"])
+  
+  return (closest.coordinate)
+}
+
+
+nearest.loc.mat <- function(dist, origin, ...){
+  locations <- list(...)
+  print(locations)
+  if (is.null(locations)){
+    return(0) # placeholder for when no locations are supplied as input arguments; to be replaced with function to generate random route that fulfills other restraints
+    
+  } else {
+    output <- list(origin)
+    
+    for (location in locations){
+      next.long.lat <- nxt_loc(dist, origin[-1], location)
+      output <- append(output, next.long.lat)
+      origin <- next.long.lat
+    }
+  }
+
+  output <- matrix(unlist(output), ncol = 3, byrow = T)
+  colnames(output) <- c("id", "Longitude", "Latitude")
+  output <- data.frame(output)
+  output$Longitude <- as.numeric(output$Longitude)
+  output$Latitude <- as.numeric(output$Latitude)
+  
+  return (output)
+}
+
+plot_route <- function(curr_loc, locations){
+  trip <- osrmTrip(locations, returnclass = "sf", overview = "full", osrm.server = getOption("osrm.server"), osrm.profile= "foot")
+  trip_sp <- trip[[1]]$trip
+  leaflet(data = trip_sp) %>%
+    addTiles() %>% 
+    addMarkers(lng = locations$Longitude, lat = locations$Latitude, popup = locations$id) %>%
+    addPolylines()
+}
+
+route_summary <- function(curr_loc, locations){
+  trip <- osrmTrip(locations, returnclass = "sf", overview = "full", osrm.server = getOption("osrm.server"), osrm.profile= "foot")
+  trip_sp <- trip[[1]]$trip
+  leg_summary <- trip_sp %>%
+    mutate(duration = round(duration, 1),
+           distance = round(distance, 1))
+
+return (leg_summary)
+}
+
+overall <- function(curr_loc, locations){
+  trip <- osrmTrip(locations, returnclass = "sf", overview = "full", osrm.server = getOption("osrm.server"), osrm.profile= "foot")
+  trip_summary <- trip[[1]]$summary
+  
+  return (trip_summary)
+}
+
+curr_location <- c("my origin!", 103.799000, 1.330022)
+inter_locations <- nearest.loc.mat(1000, curr_location, "cafe", "convenience stores", "shopping mall")
+inter_locations
+summary(inter_locations)
+plot_route(curr_location, inter_locations)
+route_summary(curr_location, inter_locations)
+overall(curr_location, inter_locations)
+
+```
+
